@@ -14,6 +14,9 @@ Shows the track you're playing on Spotify **in real time** on a 1.3" SH1106 OLED
 | **Idle (nothing playing)** | **Boot** |
 | ![Idle animated eyes](docs/idle.gif) | ![Boot sequence](docs/boot.gif) |
 
+| **Romanized Malayalam lyrics** | |
+| ![Romanized lyrics](docs/romanized-lyrics.png) | |
+
 <sub>Rendered by running the unmodified `esp32.ino` drawing code through the real U8g2 library on a PC. See [`tools/oled-sim`](#-oled-simulator). Pixel-exact, just without the camera glare.</sub>
 
 ---
@@ -44,6 +47,7 @@ Spotify Web API ──► spotify_server.py (Python, on your server)
 | Works while Discord is closed / Invisible | ❌ | ✅ |
 | Paused tracks | Still shown as playing | Reported as not playing |
 | Lyrics lookup | artist + title | first artist + title + album + duration (better matches) |
+| Non-Latin lyrics (Malayalam, Hindi, Tamil, …) | Blank on the OLED | Romanized: `മിന്നൽവള` → `minnalvala` |
 
 ---
 
@@ -63,7 +67,7 @@ Any always-on machine on the same network as the ESP32 works (home server, Raspb
 git clone https://github.com/AetherVoyager/Spotify-ESP32
 cd Spotify-ESP32
 python3 -m venv venv
-venv/bin/pip install aiohttp
+venv/bin/pip install -r requirements.txt
 ```
 
 Put your Client ID at the top of `spotify_server.py`:
@@ -176,7 +180,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --upload -p /dev/ttyUSB0 esp32
 - **Always `"playing": false`:** nothing is playing, playback is paused, or it's a podcast/ad. Check `GET /debug`.
 - **`token refresh failed` in the log:** run the `auth-url` / `auth-code` steps again.
 - **No lyrics:** lrclib.net doesn't have that song. The title, artist and progress bar still show.
-- **Blank lyric bar for non-Latin songs (Malayalam, Hindi, Japanese, …):** the sketch's U8g2 fonts (`_tr`) only contain ASCII, so those characters aren't drawn.
+- **Lyrics in other scripts:** the sketch's U8g2 fonts (`_tr`) only contain ASCII, so the server romanizes titles, artists and lyrics before sending them. Indic scripts use [indic_transliteration](https://github.com/indic-transliteration/indic_transliteration_py) (ITRANS, lowercased: `പുഞ്ചിരി` → `punchiri`, `तुम ही हो` → `tum hi ho`); everything else uses [anyascii](https://github.com/anyascii/anyascii). Set `TRANSLITERATE = False` to turn it off. Japanese/Chinese come out rough.
 - **Upload hangs at "Hard resetting via RTS pin...":** press the board's **EN/RST** button.
 - **Flash usage warning:** set Partition Scheme to **Huge APP (3MB No OTA)**.
 
@@ -227,4 +231,5 @@ Modes: `boot`, `play`, `lyrics`, `idle`.
 
 - **[EkiZR](https://github.com/EkiZR)** created the original [Spotify-ESP32](https://github.com/EkiZR/Spotify-ESP32) project: the ESP32 firmware, OLED UI, animations and lyrics sync. Instagram: [@ekizr_](https://www.instagram.com/ekizr_/). All the hard work on the display side is theirs.
 - **[lrclib.net](https://lrclib.net)** for the free synced lyrics API.
+- **[indic_transliteration](https://github.com/indic-transliteration/indic_transliteration_py)** and **[anyascii](https://github.com/anyascii/anyascii)** for romanization.
 - **[U8g2](https://github.com/olikraus/u8g2)** and **[ArduinoJson](https://arduinojson.org)**.

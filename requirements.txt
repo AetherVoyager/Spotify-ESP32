@@ -1,0 +1,3 @@
+aiohttp
+anyascii
+indic_transliteration

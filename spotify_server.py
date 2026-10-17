@@ -23,6 +23,8 @@ from pathlib import Path
 
 import aiohttp
 from aiohttp import web
+from anyascii import anyascii
+from indic_transliteration import sanscript
 
 # ════════════════════════════════════════════════════════
 # CONFIG
@@ -34,6 +36,7 @@ REDIRECT_URI = "http://127.0.0.1:8888/callback"  # must match the app settings e
 PORT = 3000
 LYRIC_LEAD = 2.4
 POLL_INTERVAL = 3  # seconds between Spotify API polls
+TRANSLITERATE = True  # OLED fonts are ASCII-only: romanize other scripts
 
 BASE = Path(__file__).resolve().parent
 TOKEN_FILE = BASE / "spotify_token.json"
@@ -130,6 +133,70 @@ async def access_token(http):
     save_token(data)
     print("[auth] token refreshed")
     return token["access_token"]
+
+# ════════════════════════════════════════════════════════
+# TRANSLITERATION
+# ════════════════════════════════════════════════════════
+
+# Indic Unicode blocks -> (sanscript scheme, drops final schwa like Hindi)
+INDIC = [
+    (0x0900, 0x097F, sanscript.DEVANAGARI, True),
+    (0x0980, 0x09FF, sanscript.BENGALI, True),
+    (0x0A00, 0x0A7F, sanscript.GURMUKHI, True),
+    (0x0A80, 0x0AFF, sanscript.GUJARATI, True),
+    (0x0B00, 0x0B7F, sanscript.ORIYA, False),
+    (0x0C00, 0x0C7F, sanscript.TELUGU, False),
+    (0x0C80, 0x0CFF, sanscript.KANNADA, False),
+    (0x0D00, 0x0D7F, sanscript.MALAYALAM, False),
+]
+
+
+def indic_block(ch):
+    cp = ord(ch)
+    for lo, hi, scheme, schwa in INDIC:
+        if lo <= cp <= hi:
+            return lo, scheme, schwa
+    return None
+
+
+def romanize_word(word, lo, scheme, schwa):
+    # ITRANS lowercased reads like everyday romanized typing ("punchiri", "pennazhake")
+    out = sanscript.transliterate(word, scheme, sanscript.ITRANS)
+    # ñ: "punchiri", "manju", "niranju" rather than "puñciri", "mañu", "niraññu"
+    out = out.replace("~n~n", "nj").replace("~nch", "nch").replace("~nj", "nj").replace("~n", "nj")
+    out = re.sub(r"[~^.{}]", "", out).lower()
+    # "तुम" -> "tum", not "tuma": drop the inherent a after a final bare consonant
+    last = ord(word[-1]) - lo
+    if schwa and 0x15 <= last <= 0x39 and out.endswith("a") and len(out) > 1:
+        out = out[:-1]
+    return out
+
+
+def to_ascii(text):
+    if not TRANSLITERATE or text.isascii():
+        return text
+
+    # sanscript's Tamil scheme adds aspirates Tamil doesn't have ("gh", "dh").
+    # Indic blocks share one layout, so read Tamil as Malayalam instead;
+    # ன (Tamil-only alveolar n) becomes ന.
+    text = "".join(
+        "ന" if c == "ன" else chr(ord(c) + 0x180) if "஀" <= c <= "௿" else c
+        for c in text
+    )
+
+    out = []
+    for word in re.split(r"(\s+)", text):
+        block = next((indic_block(c) for c in word if indic_block(c)), None)
+        if block:
+            # transliterate each run of that script, keep any Latin/punctuation as-is
+            lo = block[0]
+            parts = re.split(f"([{chr(lo)}-{chr(lo + 0x7F)}]+)", word)
+            word = "".join(
+                romanize_word(p, *block) if p and indic_block(p[0]) else p
+                for p in parts
+            )
+        out.append(anyascii(word))
+    return "".join(out)
 
 # ════════════════════════════════════════════════════════
 # FETCH LYRICS
@@ -310,13 +377,13 @@ async def handle_now_playing(request):
 
     return web.json_response({
         "playing": True,
-        "title": current["title"],
-        "artist": current["artist"],
+        "title": to_ascii(current["title"]),
+        "artist": to_ascii(current["artist"]),
         "position_ms": pos_ms,
         "duration_ms": current["duration_ms"],
-        "lyric_prev": lyric["prev"],
-        "lyric_curr": lyric["curr"],
-        "lyric_next": lyric["next"],
+        "lyric_prev": to_ascii(lyric["prev"]),
+        "lyric_curr": to_ascii(lyric["curr"]),
+        "lyric_next": to_ascii(lyric["next"]),
     })
 
 
