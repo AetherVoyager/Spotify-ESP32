@@ -6,6 +6,16 @@ Shows the track you're playing on Spotify **in real time** on a 1.3" SH1106 OLED
 >
 > This fork only swaps the **Discord bot** backend for one that reads playback straight from the **Spotify Web API**, so you don't need a Discord bot, a Discord server or Rich Presence.
 
+## 📸 Screens
+
+| Now playing | Synced lyrics |
+|---|---|
+| ![Now playing screen](docs/now-playing.png) | ![Lyrics screen](docs/lyrics.png) |
+| **Idle (nothing playing)** | **Boot** |
+| ![Idle animated eyes](docs/idle.gif) | ![Boot sequence](docs/boot.gif) |
+
+<sub>Rendered by running the unmodified `esp32.ino` drawing code through the real U8g2 library on a PC. See [`tools/oled-sim`](#-oled-simulator). Pixel-exact, just without the camera glare.</sub>
+
 ---
 
 ## 🧠 How It Works
@@ -166,6 +176,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --upload -p /dev/ttyUSB0 esp32
 - **Always `"playing": false`:** nothing is playing, playback is paused, or it's a podcast/ad. Check `GET /debug`.
 - **`token refresh failed` in the log:** run the `auth-url` / `auth-code` steps again.
 - **No lyrics:** lrclib.net doesn't have that song. The title, artist and progress bar still show.
+- **Blank lyric bar for non-Latin songs (Malayalam, Hindi, Japanese, …):** the sketch's U8g2 fonts (`_tr`) only contain ASCII, so those characters aren't drawn.
 - **Upload hangs at "Hard resetting via RTS pin...":** press the board's **EN/RST** button.
 - **Flash usage warning:** set Partition Scheme to **Huge APP (3MB No OTA)**.
 
@@ -191,6 +202,24 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --upload -p /dev/ttyUSB0 esp32
 ### `GET /debug`
 
 Current track state plus the first few loaded lyric lines.
+
+---
+
+## 🖼️ OLED Simulator
+
+`tools/oled-sim` compiles the sketch's drawing code for Linux against the real U8g2 C library (with tiny Arduino/WiFi stubs) and records every frame the sketch would send to the display. Use it to preview UI changes without flashing.
+
+```bash
+cd tools/oled-sim
+./build.sh ../../esp32.ino ~/Arduino/libraries/U8g2/src/clib   # needs gcc/g++
+pip install pillow
+
+./sim lyrics out.bin 200 "Title" "Artist" 60000 200000 "Current line" "Next line"
+python render.py out.bin lyrics.png 30          # one frame -> PNG
+./sim idle idle.bin 400 && python render.py idle.bin idle.gif 0:400:2 80   # animation -> GIF
+```
+
+Modes: `boot`, `play`, `lyrics`, `idle`.
 
 ---
 
