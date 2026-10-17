@@ -1,332 +1,201 @@
-# 🎵 Spotify OLED Display — ESP32 + Discord Bot
+# 🎵 Spotify OLED Display — ESP32 + Spotify Web API
 
-This project displays your currently playing Spotify track **in real-time** on a 1.3" OLED display (SH1106 128×64), featuring **synchronized lyrics**, an animated idle expression system, a music progress bar, and an on-screen equalizer.
+Shows the track you're playing on Spotify **in real time** on a 1.3" SH1106 OLED (128×64), with **synced lyrics**, a progress bar, an equalizer and animated idle faces.
 
----
-
-## 🗂️ Project Structure
-
-
-```
-
-├── bot.py          # Discord bot + HTTP JSON API server (runs on VPS/PC)
-├── esp32.ino       # Arduino firmware tailored for ESP32
-└── README.md
-
-```
+> 🙏 **Credit:** this is a fork of [**EkiZR/Spotify-ESP32**](https://github.com/EkiZR/Spotify-ESP32) by **EkiZR** ([Instagram](https://www.instagram.com/ekizr_/)). The ESP32 firmware, the OLED UI, the lyrics logic and the original idea are all theirs. Thank you EkiZR! ❤️
+>
+> This fork only swaps the **Discord bot** backend for one that reads playback straight from the **Spotify Web API**, so you don't need a Discord bot, a Discord server or Rich Presence.
 
 ---
 
 ## 🧠 How It Works
 
-
+```
+Spotify Web API ──► spotify_server.py (Python, on your server)
+                         │
+                    Synced lyrics from lrclib.net
+                         │
+                    HTTP JSON at :3000/now-playing
+                         │
+                    ESP32 polls every 2 s ──► SH1106 OLED
 ```
 
-Spotify ──► Discord (Rich Presence) ──► Discord Bot (Python)
-│
-Fetch synced lyrics from lrclib.net
-│
-Serve via HTTP Endpoint :3000
-│
-ESP32 Network Polling
-│
-Render on OLED SH1106
+1. `spotify_server.py` polls Spotify's *currently playing* endpoint every 3 seconds.
+2. When the track changes it fetches timestamped lyrics from [lrclib.net](https://lrclib.net) (free, no key).
+3. It serves the same `/now-playing` JSON the original Discord bot did, so **`esp32.ino` is unchanged**.
 
-```
+### What changed from the original
 
-1. You play a track on Spotify → Discord automatically broadcasts your activity via Rich Presence.
-2. The Python Discord bot (`bot.py`) captures this real-time presence data.
-3. The bot automatically fetches timestamped lyrics from [lrclib.net](https://lrclib.net) (Free, no API key required).
-4. The ESP32 micro-controller continuously polls the local/public server endpoint `/now-playing` every 2 seconds.
-5. The OLED display renders the dynamic track title, artist name, synchronized lyric line highlights, and a micro-progress bar.
+| | Original (`bot.py`) | This fork (`spotify_server.py`) |
+|---|---|---|
+| Data source | Discord Rich Presence | Spotify Web API |
+| Needs | Discord bot token, server, presence intent | Spotify app **Client ID** only |
+| Auth | Bot token | OAuth PKCE (no client secret), auto-refreshing token |
+| Works while Discord is closed / Invisible | ❌ | ✅ |
+| Paused tracks | Still shown as playing | Reported as not playing |
+| Lyrics lookup | artist + title | first artist + title + album + duration (better matches) |
 
 ---
 
-## 🎧 Prerequisites — Connecting Spotify to Discord
+## 🖥️ Section 1 — Server Setup
 
-The backend system functions by reading your **Discord Presence** broadcast data. For the script to hook into your activity, your Spotify profile must be linked to Discord.
+Any always-on machine on the same network as the ESP32 works (home server, Raspberry Pi, PC).
 
-### Step-by-Step Integration:
+### 1. Create a Spotify app
 
-1. Launch **Discord** → click the ⚙️ **User Settings** icon (bottom-left corner).
-2. On the left sidebar, navigate to **Connections**.
-3. Click the **Spotify** icon (the green circular logo).
-4. Log into your Spotify account via the external browser pop-up → authorize by clicking **Agree**.
-5. Once finalized, Spotify will be listed under your active accounts grid.
+1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) → **Create app**.
+2. Set **Redirect URI** to exactly `http://127.0.0.1:8888/callback`.
+3. Tick **Web API**, save, and copy the **Client ID**.
 
-### Activating Profile Broadcasting:
-
-Once your Spotify account is connected, verify that the toggle switch labeled **"Display Spotify as your status"** is actively flipped **ON** (Green).
-
-> ⚠️ **CRITICAL:** If this toggle remains disabled, Discord will block your Spotify streaming metrics, making it impossible for the Python server backend to scrape your music status.
-
-### Checking Discord Visibility Status:
-
-Ensure that your public Discord visibility status is **NOT** configured to *Invisible*. The presence payload can only be fetched when set to:
-
-```
-
-✅ Online        → Accessible
-✅ Idle          → Accessible
-✅ Do Not Disturb → Accessible
-❌ Invisible    → INACCESSIBLE (Blocks Data Payload)
-
-```
-
----
-
-## 🖥️ Section 1 — Python Server Backend Setup (VPS / PC)
-
-### Requirements
-
-| Software | Minimum Version |
-|----------|-----------------|
-| Python   | 3.9+            |
-| pip      | Latest stable   |
-
-### Dependency Installation
-
-Ensure Python is actively initialized inside your system variable PATH layout. Verify via your command terminal:
-```bash
-python --version
-# or alternatively
-python3 --version
-
-```
-
-Execute the command below to install the core asynchronous wrappers:
+### 2. Install
 
 ```bash
-pip install discord.py aiohttp
-
+git clone https://github.com/AetherVoyager/Spotify-ESP32
+cd Spotify-ESP32
+python3 -m venv venv
+venv/bin/pip install aiohttp
 ```
 
-> ⚙️ **Note:** This structure requires **discord.py version 2.x** or greater. If your environment maintains an antiquated legacy setup, flush it via: `pip uninstall discord.py` followed by `pip install "discord.py>=2.0"`.
-
-### Local Script Adjustments inside `bot.py`
-
-Open `bot.py` using your preferred IDE, and input your credential keys:
+Put your Client ID at the top of `spotify_server.py`:
 
 ```python
-BOT_TOKEN  = "YOUR_DISCORD_BOT_TOKEN_HERE"
-USER_ID    = 123456789012345678   # Your absolute Discord Snowflake User ID
-PORT       = 3000                  # Designated local network port layout
-LYRIC_LEAD = 2.4                  # Time offset in seconds (delivers lyrics early)
-
+CLIENT_ID  = "your_client_id"
+PORT       = 3000
+LYRIC_LEAD = 2.4   # show lyrics slightly early (seconds)
 ```
 
-#### Acquiring your `BOT_TOKEN`:
-
-1. Navigate to the [Discord Developer Portal](https://discord.com/developers/applications).
-2. Click **New Application** → define a custom application name.
-3. Access the **Bot** tab → click **Reset Token** → copy the alphanumeric string securely.
-4. Scroll down to **Privileged Gateway Intents**, and explicitly enable:
-* ✅ **Presence Intent**
-* ✅ **Server Members Intent**
-
-
-5. Move to **OAuth2 → URL Generator**, check the `bot` scope checkbox, and assign the `Read Messages/View Channels` permission flag.
-6. Copy the compiled URL script → paste it into your web browser tab → invite your custom bot into your target Discord server setup.
-
-#### Acquiring your `USER_ID`:
-
-1. Open Discord Settings → Advanced → toggle **Developer Mode** to ON.
-2. Right-click on your absolute user profile avatar image element → click **Copy User ID**.
-
-### Executing the Host Script
+### 3. Authorize (one time)
 
 ```bash
-python bot.py
-
+venv/bin/python spotify_server.py auth-url
 ```
 
-Expected operational terminal output structure:
+Open the printed link in **any** browser (your phone or PC is fine, it doesn't have to be the server) and click **Agree**. You'll land on a `http://127.0.0.1:8888/callback?code=...` page that **fails to load. That's expected.** Copy that whole address and run:
 
+```bash
+venv/bin/python spotify_server.py auth-code "http://127.0.0.1:8888/callback?code=..."
 ```
-[server] HTTP API initialized at [http://0.0.0.0:3000/now-playing]
-[bot] Logged in successfully as YourBotName#1234
-[bot] Monitoring target Discord User ID: 123456789012345678
 
+This saves `spotify_token.json` (git-ignored). It refreshes itself, so you only do this once.
+
+### 4. Run
+
+```bash
+venv/bin/python spotify_server.py
 ```
+
+#### Run 24/7 with systemd (Linux)
+
+`/etc/systemd/system/spotify-esp32.service`:
+
+```ini
+[Unit]
+Description=Spotify now-playing server for ESP32 OLED
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/spotify-esp32
+ExecStart=/opt/spotify-esp32/venv/bin/python -u spotify_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now spotify-esp32
+journalctl -u spotify-esp32 -f
+```
+
+If you use a firewall, allow port 3000 from your LAN (e.g. `sudo ufw allow from 192.168.1.0/24 to any port 3000`).
 
 ---
 
-## ☁️ Cloud VPS Deployment (Recommended for 24/7 Uptime)
+## 🔌 Section 2 — ESP32
 
-To prevent your local hardware machine from needing to remain constantly active, deploy the script onto an external virtual private cloud server framework (e.g., DigitalOcean, Vultr, AWS, Contabo).
+### Hardware
 
-### 0. Mapping Your Server's Architecture Interface
-
-Local machine configurations point towards an internal routing system. When operating on a cloud network or local mesh framework, verify your active connectivity pointers:
-
-* **Local Machine Deployment (Same Local Wi-Fi Mesh):**
-Run `ipconfig` inside your Windows command terminal. For example, your assigned network adapter IP address might display as:
-```
-IPv4 Address. . . . . . . . . . . : 192.168.3.37
-
-```
-
-
-This explicit string acts as your localized hardware path index inside `esp32.ino`:
-```cpp
-const char* SERVER_URL = "[http://192.168.3.37:3000/now-playing](http://192.168.3.37:3000/now-playing)";
-
-```
-
-
-*Note: Localhost loops (`127.0.0.1`) are internal to your PC and will fail if called externally by the ESP32.*
-* **Cloud VPS Deployment Architecture:**
-Scrape your dynamic public address mapping from your cloud platform infrastructure administration console panel, or ping an external echo route from your active SSH session console:
-```bash
-curl ifconfig.me
-
-```
-
-
-Apply the returned public routing string value directly to your ESP32 configuration block layout.
-
----
-
-### 1. File Push Protocol
-
-```bash
-scp bot.py root@your-vps-ip-address:/home/user/spotify-oled/
-
-```
-
-### 2. Dependency Resolution inside the Linux Host
-
-```bash
-sudo apt update
-sudo apt install python3 python3-pip -y
-pip3 install discord.py aiohttp
-
-```
-
-### 3. Background Persistence Management via `screen`
-
-```bash
-screen -S spotify-bot
-python3 bot.py
-# Detach cleanly by executing the key sequence: Ctrl + A, then press D
-
-```
-
-To re-attach to the ongoing terminal execution block thread:
-
-```bash
-screen -r spotify-bot
-
-```
-
-### 4. Firewall Rule Authorization Mapping
-
-```bash
-sudo ufw allow 3000
-
-```
-
----
-
-## 🔌 Section 2 — ESP32 Hardware Integration
-
-### Hardware Checklist
-
-| Component Name | Specific Metric Model Layout |
+| Component | Model |
 | --- | --- |
 | ESP32 DevKit | NodeMCU ESP32, WEMOS D1 R32, etc. |
-| OLED Screen | SH1106 1.3-inch 128×64 (I2C interface) |
-| Jumper Cables | Female-to-Female physical wires |
+| OLED | SH1106 1.3" 128×64 (I2C) |
+| Wires | Female-to-female jumpers |
 
-### Pinout Wiring Diagram (I2C Layout)
-
-```
-ESP32 Microcontroller      SH1106 OLED Display Panel
-      GPIO 21 ───────────► SDA (Serial Data Bus)
-      GPIO 22 ───────────► SCL (Serial Clock Bus)
-      3.3V    ───────────► VCC (Power Input Line)
-      GND     ───────────► GND (Common Ground Earth)
+### Wiring
 
 ```
+ESP32        SH1106 OLED
+GPIO 21 ───► SDA
+GPIO 22 ───► SCL
+3.3V    ───► VCC
+GND     ───► GND
+```
 
-### Essential Arduino IDE Libraries
-
-Launch your local Arduino desktop IDE interface, and open the integrated asset panel manager through **Tools → Manage Libraries...** (`Ctrl + Shift + I`). Search for and install:
-
-1. **U8g2** (Maintained by **oliver**) — Specialized high-performance monochrome graphics handler. *Select "Install All" to fulfill nested elements.*
-2. **ArduinoJson** (Maintained by **Benoit Blanchon**) — Optimized micro-parsing buffer stream logic framework.
-3. **HTTPClient & WiFi** — Native baseline micro-firmware drivers included directly with the core Espressif ESP32 hardware index framework stack.
-
-### Firmware Setup & Variable Compilation inside `esp32.ino`
-
-Adjust your hardware pointers to match your localized routing metrics:
+### Configure `esp32.ino`
 
 ```cpp
-const char* WIFI_SSID  = "Your_WiFi_Network_Name";
+const char* WIFI_SSID  = "Your_WiFi_Name";
 const char* WIFI_PASS  = "Your_WiFi_Password";
-const char* SERVER_URL = "http://192.168.3.37:3000/now-playing";  // Change to your server using IPV4 address. "
-
+const char* SERVER_URL = "http://192.168.1.50:3000/now-playing"; // your server's LAN IP
 ```
 
-### Flashing Code into the Board Environment
+Use the server's **LAN** IP, not `127.0.0.1`. The ESP32 can't join Tailscale or other VPNs either.
 
-1. Select your target development architecture node framework via **Tools → Board → ESP32 Dev Module**.
-2. Identify your active interface device layout path index via the **Tools → Port** listing matrix.
-3. Initialize execution by clicking the **Upload** arrow icon.
+### Flash
 
----
+**Arduino IDE:** install the **esp32** board package and the **U8g2** and **ArduinoJson** libraries, pick **ESP32 Dev Module**, then Upload.
 
-## 🔧 Deep-Dive System Troubleshooting
+**arduino-cli** (headless, e.g. ESP32 plugged into the server):
 
-### Local Machine Hardware Lock on "Hard resetting via RTS pin..."
-
-If your local deployment compiling console hangs indefinitely at the physical termination indicator block line during a flash sequence while your connected display remains blank, **your code has compiled and transferred perfectly**. This occurs when the host system USB-to-UART bridge driver hardware chip fails to cleanly trigger the automatic electrical sequence to reset the physical ESP32 pin lines.
-
-* **Immediate Fix:** Press the onboard **EN** (or **RST**) tactile button located directly adjacent to the physical Micro-USB/Type-C interface slot once. This forces a cold hardware restart execution cycle.
-* **Continuous Error Prevention:** Completely isolate the microcontroller device unit framework asset pipeline by detaching the physical USB cable connector entirely for 10 full seconds, allowing internal board capacitors to discharge completely. Re-attach to an alternative native port layout channel interface hub.
-
-### Memory Optimization Mapping (83%+ Flash Allocation Warning)
-
-The comprehensive cryptographic structure blocks utilized by automated JSON stream data structures consume significant space within the micro-controller flash allocations. If your Arduino compiling screen returns an absolute allocation alert boundary notice, switch the system partitioning configuration template:
-
-1. Open **Tools** menu panel structure on Arduino IDE.
-2. Access the **Partition Scheme** structural configuration drop-down index block track layout row.
-3. Switch configuration from *Default* to **"Huge APP (3MB No OTA / 1MB SPIFFS)"**.
-4. Re-run your compile framework program pipeline to reduce your system storage profile down safely below a clean ~35% threshold boundary.
-
-### Terminal Communication Tracking via `HTTP code: -1`
-
-If your Serial Monitor tracking window continuously loops a `-1` status return, it indicates **`HTTPC_ERROR_CONNECTION_REFUSED`**. The ESP32 is functioning normally but can't establish a handshake with the host server address.
-
-* Ensure both the ESP32 and the machine hosting `bot.py` are attached to the exact same Wi-Fi network SSID configuration name mesh infrastructure.
-* Confirm your host laptop's local IPv4 network address mapping index hasn't shifted by validating metrics via `ipconfig`.
-* Add an absolute inbound exclusion exception rule to your native Windows Defender or Linux OS Firewall security management framework layer blocks to permit traffic over port `3000`.
+```bash
+arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+arduino-cli core update-index && arduino-cli core install esp32:esp32
+arduino-cli lib install U8g2 ArduinoJson
+mkdir esp32 && cp esp32.ino esp32/
+arduino-cli compile --fqbn esp32:esp32:esp32 --upload -p /dev/ttyUSB0 esp32
+```
 
 ---
 
-## 📡 API Endpoint Definitions
+## 🔧 Troubleshooting
+
+- **`[FETCH] HTTP code: -1` on the serial monitor:** the ESP32 can't reach the server. Check that the server is running, `SERVER_URL` uses the right LAN IP, both are on the same network, and port 3000 isn't firewalled.
+- **Always `"playing": false`:** nothing is playing, playback is paused, or it's a podcast/ad. Check `GET /debug`.
+- **`token refresh failed` in the log:** run the `auth-url` / `auth-code` steps again.
+- **No lyrics:** lrclib.net doesn't have that song. The title, artist and progress bar still show.
+- **Upload hangs at "Hard resetting via RTS pin...":** press the board's **EN/RST** button.
+- **Flash usage warning:** set Partition Scheme to **Huge APP (3MB No OTA)**.
+
+---
+
+## 📡 API
 
 ### `GET /now-playing`
 
-Returns the structural status of the active tracking stream parameters:
-
 ```json
 {
+  "playing": true,
   "title": "Tampar",
   "artist": "Juicy Luicy",
-  "playing": true,
   "position_ms": 171136,
   "duration_ms": 202824,
   "lyric_prev": "Tutup air mata",
   "lyric_curr": "Tiga tahun tak terasa, masih kau yang ada",
   "lyric_next": "Bodoh yang sebenarnya"
 }
-
 ```
 
+### `GET /debug`
 
-## Credit
+Current track state plus the first few loaded lyric lines.
 
-Created by EkiZR
+---
 
-Instagram: https://www.instagram.com/ekizr_/?hl=id
+## ❤️ Credits
+
+- **[EkiZR](https://github.com/EkiZR)** created the original [Spotify-ESP32](https://github.com/EkiZR/Spotify-ESP32) project: the ESP32 firmware, OLED UI, animations and lyrics sync. Instagram: [@ekizr_](https://www.instagram.com/ekizr_/). All the hard work on the display side is theirs.
+- **[lrclib.net](https://lrclib.net)** for the free synced lyrics API.
+- **[U8g2](https://github.com/olikraus/u8g2)** and **[ArduinoJson](https://arduinojson.org)**.

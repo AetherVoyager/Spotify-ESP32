@@ -1,0 +1,4 @@
+spotify_token.json
+.pkce_verifier
+__pycache__/
+venv/
