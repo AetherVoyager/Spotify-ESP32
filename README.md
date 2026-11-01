@@ -74,9 +74,10 @@ Put your Client ID at the top of `spotify_server.py`:
 
 ```python
 CLIENT_ID  = "your_client_id"
-PORT       = 3000
 LYRIC_LEAD = 2.4   # show lyrics slightly early (seconds)
 ```
+
+It listens on `0.0.0.0:3000`. Set `SPOTIFY_HOST` / `SPOTIFY_PORT` to change that.
 
 ### 3. Authorize (one time)
 

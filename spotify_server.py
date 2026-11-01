@@ -14,6 +14,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import os
 import re
 import secrets
 import sys
@@ -33,7 +34,8 @@ from indic_transliteration import sanscript
 CLIENT_ID = ""  # from https://developer.spotify.com/dashboard
 REDIRECT_URI = "http://127.0.0.1:8888/callback"  # must match the app settings exactly
 
-PORT = 3000
+HOST = os.environ.get("SPOTIFY_HOST", "0.0.0.0")
+PORT = int(os.environ.get("SPOTIFY_PORT", "3000"))
 LYRIC_LEAD = 2.4
 POLL_INTERVAL = 3  # seconds between Spotify API polls
 TRANSLITERATE = True  # OLED fonts are ASCII-only: romanize other scripts
@@ -413,9 +415,9 @@ async def main():
 
     runner = web.AppRunner(app)
     await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", PORT).start()
+    await web.TCPSite(runner, HOST, PORT).start()
 
-    print(f"[server] http://0.0.0.0:{PORT}/now-playing")
+    print(f"[server] http://{HOST}:{PORT}/now-playing")
     await poll_loop()
 
 
